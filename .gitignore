@@ -1,0 +1,9 @@
+# Credenciales y configuraciones locales
+.env
+*.pem
+*.ppk
+
+# Entorno virtual y cachés de Python
+.venv/
+__pycache__/
+*.py[cod]
