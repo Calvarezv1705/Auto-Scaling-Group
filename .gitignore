@@ -7,3 +7,7 @@
 .venv/
 __pycache__/
 *.py[cod]
+
+# Logs operativos generados durante la ejecución
+experiments/decision_log.jsonl
+experiments/controller_errors.jsonl

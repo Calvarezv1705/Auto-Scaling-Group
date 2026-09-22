@@ -13,7 +13,8 @@ REGION = "us-east-1"
 NAMESPACE = "AutoScalingController"
 METRIC_NAME = "SimulatedDemand"
 SCENARIO = "Challenge1"
-
+MAX_GAP_SECONDS = 90
+MAX_METRIC_AGE_SECONDS = 240
 
 def read_recent_demands(lookback_minutes=30, limit=3):
     # Creamos un cliente para consultar CloudWatch.
@@ -88,9 +89,42 @@ def main():
     # Una ventana incompleta no puede enviarse al decisor.
     if len(points) < 3:
         print(f"Ventana incompleta: {len(points)}/3")
-    else:
-        window = [point["value"] for point in points]
-        print(f"Ventana completa: {window}")
+        return
+
+    gaps = [
+        (
+            current["timestamp"] - previous["timestamp"]
+        ).total_seconds()
+        for previous, current in zip(points, points[1:])
+    ]
+
+    largest_gap = max(gaps)
+
+    if largest_gap > MAX_GAP_SECONDS:
+        print(
+            "Ventana discontinua: separación máxima de "
+            f"{int(largest_gap)} segundos"
+        )
+        return
+
+    latest_timestamp = points[-1]["timestamp"].astimezone(timezone.utc)
+    latest_age = (
+        datetime.now(timezone.utc) - latest_timestamp
+    ).total_seconds()
+
+    if latest_age < -30:
+        print("Ventana inválida: la última medición tiene una hora futura")
+        return
+
+    if latest_age > MAX_METRIC_AGE_SECONDS:
+        print(
+            "Ventana antigua: la última medición tiene "
+            f"{int(latest_age)} segundos"
+        )
+        return
+
+    window = [point["value"] for point in points]
+    print(f"Ventana válida y completa: {window}")
 
 
 if __name__ == "__main__":
