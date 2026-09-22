@@ -1,0 +1,36 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadMetricsAndAutoScalingState",
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:GetMetricStatistics",
+        "autoscaling:DescribeAutoScalingGroups"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "PublishOnlyProjectMetrics",
+      "Effect": "Allow",
+      "Action": "cloudwatch:PutMetricData",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "cloudwatch:namespace": "AutoScalingController"
+        }
+      }
+    },
+    {
+      "Sid": "ChangeOnlyProjectAutoScalingGroup",
+      "Effect": "Allow",
+      "Action": "autoscaling:SetDesiredCapacity",
+      "Resource": "arn:aws:autoscaling:us-east-1:ACCOUNT_ID:autoScalingGroup:*:autoScalingGroupName/asc-web-asg",
+      "Condition": {
+        "StringEquals": {
+          "autoscaling:ResourceTag/Project": "AutoScalingController"
+        }
+      }
+    }
+  ]
+}
