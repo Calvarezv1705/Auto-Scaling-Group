@@ -1,0 +1,2 @@
+scale_out_all_healthy_at=2026-09-22T02:56:46Z
+scale_in_complete_at=2026-09-22T03:14:04Z
