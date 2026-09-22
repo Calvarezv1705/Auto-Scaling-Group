@@ -15,6 +15,15 @@
 - Semilla del generador: 3016.
 - Políticas de escalamiento administradas por AWS: ninguna.
 
+## Objetivo de nivel de servicio
+
+El SLO funcional del experimento fue mantener al menos una instancia
+saludable detrás del ALB y conservar el endpoint `/health` respondiendo
+`HTTP 200` durante los cambios de capacidad.
+
+La prueba verificó disponibilidad funcional. No midió un porcentaje de
+disponibilidad de largo plazo ni definió un límite máximo de latencia.
+
 ## Resultados
 
 | Caso | Ventana | Capacidad antes | Decisión | Capacidad solicitada | Resultado |
@@ -23,6 +32,19 @@
 | Demanda alta | `[89, 90, 74]` | 1 | `INCREASE_CAPACITY` | 2 | Solicitud aceptada por AWS |
 | Ventana discontinua | `74`, pausa de 420 s, `15`, `19` | 2 | `MAINTAIN_CAPACITY` | 2 | Reducción bloqueada de forma segura |
 | Recuperación | `[15, 19, 22]` | 2 | `REDUCE_CAPACITY` | 1 | Solicitud aceptada por AWS |
+
+## Serie temporal
+
+![Demanda, decisiones y capacidad deseada](time-series.png)
+
+La línea azul representa `SimulatedDemand`. Los segmentos separados
+indican intervalos sin mediciones consecutivas. La línea naranja
+representa la capacidad deseada del ASG, no la cantidad instantánea de
+instancias completamente saludables.
+
+Las líneas verticales señalan la hora de cada decisión. La terminación
+física de la instancia continuó después de que la capacidad deseada
+cambió de 2 a 1.
 
 ## Tiempos observados
 
@@ -94,11 +116,11 @@ El experimento contiene una ejecución por escenario. Sirve como prueba
 funcional reproducible, pero no permite calcular promedios, variación
 ni intervalos de confianza.
 
-El controlador fue invocado manualmente durante el experimento. Antes
-de la entrega se añadirá un ejecutor periódico para que el ciclo de
-observación y decisión pueda operar automáticamente.
+El experimento controlado ejecutó un ciclo por escenario para aislar
+cada decisión. El repositorio también incluye `controller/runner.py`,
+que ejecuta el ciclo periódicamente y permite operación automática.
 
 AWS Academy proporciona el rol temporal `voclabs`. Por esa razón, el
 experimento no demuestra la creación de un rol real de mínimo
-privilegio. La política mínima necesaria se documentará como parte del
-diseño.
+privilegio. La política propuesta está documentada en `docs/iam.md` y
+`infra/controller-policy.json`.

@@ -323,6 +323,8 @@ Los resultados definitivos están en:
 - `experiments/final-experiment.jsonl`
 - `experiments/results.md`
 - `experiments/timing.txt`
+- `experiments/time-series.png`
+- `experiments/plot_results.py`
 
 El experimento demostró:
 

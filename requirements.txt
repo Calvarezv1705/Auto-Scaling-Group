@@ -1,1 +1,2 @@
 boto3==1.43.97
+matplotlib>=3.9,<4
