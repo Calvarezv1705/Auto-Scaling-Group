@@ -29,11 +29,14 @@ def read_asg_state(client):
 
     group = groups[0]
 
-    # Contamos solo las instancias que ya están en servicio.
+    # Contamos solo las instancias en servicio y saludables.
     in_service = sum(
         1
         for instance in group["Instances"]
-        if instance["LifecycleState"] == "InService"
+        if (
+            instance["LifecycleState"] == "InService"
+            and instance["HealthStatus"] == "Healthy"
+        )
     )
 
     return {

@@ -1,86 +1,262 @@
-# Clasificación del controlador de elasticidad
+# Clasificación y diseño del controlador de elasticidad
 
-## Solución propuesta
+## Solución implementada
 
-Aplicación web mínima en instancias EC2 detrás de un balanceador.
-Un controlador propio observará el sistema y decidirá cuándo mantener,
-aumentar o reducir la capacidad, dentro del límite de 1 a 5 instancias.
+La solución consiste en una aplicación web mínima ejecutada en instancias EC2 detrás de un Application Load Balancer.
 
-| Dimensión | Clasificación | Justificación y origen |
+Un controlador propio escrito en Python observa demanda sintética, consulta el estado del Auto Scaling Group y decide cuándo mantener, aumentar o reducir la capacidad entre 1 y 5 instancias.
+
+El Auto Scaling Group no utiliza políticas de escalamiento dinámico administradas por AWS. Todas las decisiones pertenecen al controlador implementado en este proyecto.
+
+## Clasificación
+
+| Dimensión | Clasificación | Justificación |
 | --- | --- | --- |
-| Tipo y dirección | Horizontal; aumento y reducción | El reto exige añadir y retirar instancias EC2. Impuesto. |
-| Recursos escalados | Número de máquinas virtuales EC2, entre 1 y 5 | Recurso y límites impuestos por el reto. |
-| Alcance | Infraestructura de la aplicación web | Elegimos un controlador separado de la aplicación que actúa sobre EC2. |
-| Propósito | Sostener el rendimiento y evitar capacidad innecesaria | Objetivos impuestos; la meta numérica de rendimiento será elección nuestra. |
-| Modo | Automático y reactivo | La autonomía es obligatoria; reaccionar a mediciones observadas es elección nuestra. |
-| Método de decisión | Reglas con umbrales y retroalimentación | Elección nuestra; definiremos métricas, umbrales y protección contra oscilaciones en el diseño. |
-| Arquitectura | Centralizada | Elegimos un solo proceso que decide sobre todas las instancias. |
-| Alcance de proveedor | Un solo proveedor: AWS | Impuesto por el reto. |
+| Tipo | Elasticidad horizontal | Se añaden o retiran instancias EC2. |
+| Dirección | Aumento y reducción | El controlador puede incrementar o disminuir la capacidad. |
+| Recurso escalado | Máquinas virtuales EC2 | La capacidad se representa mediante el número de instancias. |
+| Límites | Entre 1 y 5 instancias | Restricción establecida para el experimento. |
+| Alcance | Infraestructura de una aplicación web | El controlador funciona fuera de la aplicación y administra su infraestructura. |
+| Propósito | Mantener disponibilidad y evitar capacidad innecesaria | Busca responder a la demanda sin conservar instancias que no se necesitan. |
+| Modo | Automático y reactivo | Reacciona periódicamente a mediciones ya observadas. |
+| Método | Reglas con umbrales y retroalimentación | Compara ventanas de demanda con límites calculados según la capacidad. |
+| Arquitectura | Centralizada | Un proceso toma las decisiones sobre todo el grupo. |
+| Proveedor | AWS | Utiliza EC2, Auto Scaling, ELB y CloudWatch. |
 
-## Fuentes
+## Fuentes conceptuales
 
-- Al-Dhuraibi et al., *Elasticity in Cloud Computing: State of the Art
-  and Research Challenges*, sección 2.1 y figura 1 (horizontal y vertical);
-  sección 2.2 y figura 2 (taxonomía).
-- *Build Your Own Auto-Scaling Controller*, SI3016, secciones 4, 5 y 7
-  (decisiones requeridas, clasificación y restricciones).
+- Al-Dhuraibi et al., *Elasticity in Cloud Computing: State of the Art and Research Challenges*, sección 2.1 y figura 1 para elasticidad horizontal y vertical; sección 2.2 y figura 2 para la taxonomía.
+- *Build Your Own Auto-Scaling Controller*, SI3016, secciones 4, 5 y 7 para las decisiones, restricciones y clasificación solicitadas.
 
-## Diseño del lazo de control
+## Arquitectura
 
-### Ejecución y componentes
+```text
+Generador reproducible
+        |
+        v
+Publicador de SimulatedDemand
+        |
+        v
+Amazon CloudWatch
+        |
+        v
+Monitor -> Decisor -> Actuador
+                       |
+                       v
+             Auto Scaling Group
+                       |
+                       v
+                1 a 5 EC2
+                       |
+                       v
+          Application Load Balancer
+```
 
-El controlador correrá en un proceso Python en el Mac durante el
-experimento. El simulador publicará SimulatedDemand en CloudWatch.
-El monitor leerá las métricas y el estado de AWS; el decisor aplicará
-reglas propias; el actuador cambiará la capacidad deseada de un ASG.
-El ASG tendrá mínimo 1 y máximo 5, sin políticas de escalado dinámico.
+El controlador se ejecuta como un proceso Python en el computador del operador. La aplicación web funciona en las instancias EC2 y expone el endpoint `/health`.
 
-### Observaciones
+## Componentes del lazo de control
 
-- SimulatedDemand: demanda sintética publicada cada 60 segundos.
-- HealthyHostCount: instancias sanas observadas en CloudWatch.
-- Estado del ASG y de sus destinos: confirma capacidad en curso y disponible.
-- CPUUtilization: contexto real, no entrada de la regla de demanda sintética.
-- Una solicitud HTTP por minuto: estado y latencia de la aplicación,
-  sin generar tráfico masivo.
+### Generador
 
-### Política propuesta
+`simulation/workload.py` produce una secuencia reproducible de demanda sintética utilizando la semilla `3016`.
 
-El controlador evaluará una vez por minuto las últimas 3 mediciones
-válidas y consecutivas de SimulatedDemand. Suponemos inicialmente
-40 unidades de demanda sintética por instancia sana.
+### Publicador
 
-- INCREASE_CAPACITY: las 3 lecturas superan el 80 % de la capacidad
-  sana actual y la capacidad deseada es menor que 5.
-- REDUCE_CAPACITY: las 3 lecturas caben en el 60 % de la capacidad
-  que quedaría tras retirar una instancia, y quedaría al menos 1.
-- MAINTAIN_CAPACITY: no se cumplen esas condiciones, faltan datos
-  o hay una acción anterior en curso.
+`simulation/publisher.py` envía cada valor a CloudWatch con:
 
-Después de una acción habrá al menos 5 minutos de espera. Para volver
-a escalar también deberá haber terminado el cambio y estar confirmada
-la salud de las instancias. Una instancia en estado running todavía
-no cuenta como disponible para atender la aplicación.
+- Namespace: `AutoScalingController`
+- Métrica: `SimulatedDemand`
+- Dimensión: `Scenario=Challenge1`
 
-### Fallos y registro
+### Monitor
 
-Un dato ausente nunca se interpreta como demanda cero. Si falla una
-consulta o no puede confirmarse la salud, no se reduce capacidad.
-Si una acción tiene resultado incierto, se consulta el estado real del
-ASG antes de repetirla. El actuador comprobará de nuevo los límites
-de 1 a 5.
+`controller/monitor.py` consulta las mediciones recientes de `SimulatedDemand` y construye una ventana con las últimas tres.
 
-Cada ciclo registrará hora, métricas, ventana, capacidad deseada y
-sana, decisión, justificación, acción solicitada y resultado o error.
+El monitor rechaza:
 
-### Permisos y límite experimental
+- Ventanas con menos de tres mediciones.
+- Mediciones separadas por más de 90 segundos.
+- Una última medición con más de 240 segundos de antigüedad.
+- Valores ausentes o inválidos.
 
-El controlador solo deberá recibir los permisos AWS necesarios para
-leer métricas y salud, consultar el ASG y cambiar su capacidad deseada.
-Debemos verificar si AWS Academy permite crear una identidad con esos
-permisos; el rol temporal voclabs por sí solo no demuestra mínimo
-privilegio.
+Un dato ausente nunca se interpreta como demanda cero.
 
-SimulatedDemand es una carga representada, no tráfico real. La prueba
-HTTP ligera permitirá observar disponibilidad y latencia, pero no
-validará rendimiento bajo carga masiva real.
+### Decisor
+
+`controller/decisor.py` recibe la ventana validada, la capacidad saludable y la capacidad deseada.
+
+Cada instancia saludable representa 40 unidades de demanda sintética.
+
+Las decisiones posibles son:
+
+- `INCREASE_CAPACITY`
+- `REDUCE_CAPACITY`
+- `MAINTAIN_CAPACITY`
+
+### Actuador
+
+`controller/actuator.py` consulta el estado real del ASG antes de actuar.
+
+Una instancia solo cuenta como capacidad disponible cuando cumple:
+
+```text
+LifecycleState = InService
+HealthStatus = Healthy
+```
+
+El actuador realiza cambios de una sola instancia y comprueba otra vez que la capacidad solicitada se encuentre entre 1 y 5.
+
+Sin `--execute`, informa la acción en modo `DRY_RUN` y no modifica AWS.
+
+### Coordinador
+
+`controller/main.py` ejecuta un ciclo completo:
+
+1. Consulta el estado del ASG.
+2. Lee las métricas de CloudWatch.
+3. Valida la ventana.
+4. Comprueba cambios de capacidad y cooldown.
+5. Solicita una decisión.
+6. Ejecuta o simula la acción.
+7. Guarda el resultado en formato JSONL.
+
+### Ejecutor periódico
+
+`controller/runner.py` repite automáticamente el ciclo del controlador.
+
+Puede ejecutarse continuamente con:
+
+```bash
+python -m controller.runner \
+  --interval 60 \
+  --minutes 15 \
+  --execute
+```
+
+## Política de decisión
+
+### Aumento
+
+El controlador aumenta una instancia cuando:
+
+- Existen exactamente tres mediciones válidas y consecutivas.
+- Las tres superan el 80 % de la capacidad saludable actual.
+- Toda la capacidad deseada está disponible.
+- No existe otro cambio en curso.
+- El cooldown terminó.
+- La capacidad deseada es menor que 5.
+
+### Reducción
+
+El controlador retira una instancia cuando:
+
+- Existen exactamente tres mediciones válidas y consecutivas.
+- Las tres caben bajo el 60 % de la capacidad que quedaría.
+- Toda la capacidad deseada está disponible.
+- No existe otro cambio en curso.
+- El cooldown terminó.
+- Después de reducir queda al menos una instancia.
+
+### Mantenimiento
+
+El controlador conserva la capacidad cuando:
+
+- La demanda permanece dentro de la banda estable.
+- Solo aparece un pico aislado.
+- La ventana está incompleta, antigua o discontinua.
+- Existe una instancia pendiente o no saludable.
+- Hay un cambio anterior en curso.
+- El cooldown continúa activo.
+- Se alcanzó alguno de los límites.
+
+## Estabilidad y seguridad
+
+La ventana de tres mediciones evita reaccionar ante un solo pico.
+
+Los límites diferentes para aumentar y reducir forman una histéresis:
+
+- Aumento sobre el 80 % de la capacidad actual.
+- Reducción bajo el 60 % de la capacidad restante.
+
+Después de una acción se aplica un cooldown de 300 segundos.
+
+Una instancia en estado `running` no cuenta inmediatamente como capacidad disponible. Debe estar `InService` y `Healthy`.
+
+## Observaciones utilizadas
+
+La entrada automática de demanda es exclusivamente `SimulatedDemand`, almacenada en CloudWatch.
+
+El controlador también consulta en el Auto Scaling Group:
+
+- Capacidad mínima.
+- Capacidad máxima.
+- Capacidad deseada.
+- Estado del ciclo de vida de cada instancia.
+- Estado de salud de cada instancia.
+
+`CPUUtilization` no participa en la decisión porque la aplicación mínima no recibe una carga real representativa.
+
+El Target Group y el endpoint `/health` se utilizaron para comprobar manualmente la disponibilidad y la distribución del tráfico durante el experimento. No son una segunda señal de demanda.
+
+## Objetivo de nivel de servicio
+
+El SLO funcional del experimento fue:
+
+- Mantener al menos una instancia saludable detrás del ALB.
+- Conservar el endpoint `/health` respondiendo `HTTP 200` durante los cambios de capacidad.
+
+El experimento no establece un porcentaje de disponibilidad de largo plazo ni una garantía máxima de latencia.
+
+## Manejo de fallos
+
+El controlador conserva la capacidad cuando no dispone de datos confiables.
+
+Si una consulta falla, el runner registra el error y espera al siguiente ciclo. Si una acción tiene resultado incierto, el siguiente ciclo consulta nuevamente el estado real del ASG antes de tomar otra decisión.
+
+La reducción se bloquea cuando no puede confirmarse la capacidad saludable.
+
+## Registro y trazabilidad
+
+Cada ciclo registra:
+
+- Hora.
+- Métricas consultadas.
+- Ventana utilizada.
+- Capacidad mínima, máxima, deseada y saludable.
+- Estado del cooldown.
+- Decisión y justificación.
+- Acción solicitada.
+- Resultado de la actuación.
+
+La evidencia definitiva se encuentra en:
+
+- `experiments/final-experiment.jsonl`
+- `experiments/results.md`
+- `experiments/time-series.png`
+
+## Permisos
+
+El controlador requiere permisos para:
+
+- Leer y publicar la métrica personalizada.
+- Consultar el Auto Scaling Group.
+- Cambiar su capacidad deseada.
+
+AWS Academy proporciona credenciales temporales mediante el rol `voclabs`. Por esta razón, el experimento no crea una identidad IAM propia.
+
+La propuesta de mínimo privilegio está documentada en:
+
+- `docs/iam.md`
+- `infra/controller-policy.json`
+
+Las credenciales temporales se almacenan fuera del repositorio.
+
+## Limitaciones
+
+`SimulatedDemand` representa una carga sintética. No demuestra cuántas solicitudes reales puede atender una instancia.
+
+La capacidad de 40 unidades por instancia es una suposición del diseño y debería calibrarse mediante pruebas de rendimiento autorizadas.
+
+Los tiempos registrados corresponden a una ejecución por escenario. No representan promedios ni garantías del servicio AWS.
+
+Los resultados y su análisis crítico están documentados en `experiments/results.md`.

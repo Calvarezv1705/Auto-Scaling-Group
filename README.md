@@ -316,6 +316,30 @@ Cuando la decisión sea correcta, se permite la actuación real:
 python -m controller.main --minutes 15 --execute
 ```
 
+## Pruebas locales
+
+Las pruebas no se conectan con AWS ni generan costos.
+
+Ejecuta:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+Las pruebas verifican:
+
+- Aumento ante demanda alta sostenida.
+- Reducción ante demanda baja sostenida.
+- Mantenimiento ante un pico aislado.
+- Exclusión de instancias no saludables del cálculo de capacidad.
+
+El resultado esperado termina con:
+
+```text
+Ran 4 tests
+OK
+```
+
 ## Evidencia
 
 Los resultados definitivos están en:
