@@ -349,3 +349,6 @@ El experimento demostró:
 - El experimento no genera tráfico masivo.
 - El controlador valida los límites antes de actuar.
 - Los recursos deben eliminarse o detenerse después de la demostración.
+
+El procedimiento de eliminación está documentado en
+[`infra/cleanup.md`](infra/cleanup.md).
