@@ -135,6 +135,13 @@ El resultado esperado es:
 []
 ```
 
+Las instrucciones completas para recrear estos recursos están en
+[`infra/README.md`](infra/README.md).
+
+La propuesta de mínimo privilegio está documentada en
+[`docs/iam.md`](docs/iam.md), con la política en
+[`infra/controller-policy.json`](infra/controller-policy.json).
+
 ## Política de decisión
 
 Cada instancia saludable representa 40 unidades de demanda sintética.
