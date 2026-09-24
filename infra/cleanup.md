@@ -1,8 +1,7 @@
 # Limpieza segura de recursos AWS
 
 Este procedimiento elimina los recursos del proyecto para detener el
-consumo de presupuesto. Funciona tanto con la ejecución histórica en la
-VPC predeterminada como con las recreaciones nuevas en `asc-vpc`.
+consumo de presupuesto.
 
 Ejecutarlo solamente después de la demostración o cuando se quiera
 recrear toda la infraestructura.
