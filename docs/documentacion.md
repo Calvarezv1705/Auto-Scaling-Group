@@ -72,11 +72,6 @@ el laboratorio. En producción sería preferible ubicar las instancias en
 subredes privadas y proporcionar salida controlada mediante NAT Gateway
 o VPC endpoints.
 
-La ejecución experimental registrada se realizó antes de esta mejora de
-reproducibilidad y utilizó la VPC predeterminada disponible en AWS
-Academy. La topología lógica, la política del controlador y sus
-resultados no dependen de que la VPC sea predeterminada o personalizada.
-
 ## Componentes del lazo de control
 
 ### Generador
