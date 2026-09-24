@@ -3,7 +3,7 @@
 ## Configuración
 
 - Región AWS: `us-east-1`.
-- Red de la ejecución registrada: VPC predeterminada de AWS Academy.
+- Red de la ejecución registrada: VPC personalizada `172.16.0.0/16`
 - Auto Scaling Group: `asc-web-asg`.
 - Capacidad mínima: 1 instancia.
 - Capacidad máxima: 5 instancias.
@@ -15,11 +15,6 @@
 - Cooldown: 300 segundos.
 - Semilla del generador: 3016.
 - Políticas de escalamiento administradas por AWS: ninguna.
-
-Después del experimento se mejoró la guía de infraestructura para que
-las recreaciones futuras creen una VPC personalizada `172.16.0.0/16`
-con dos subredes públicas. Esta mejora no cambia la política ni los
-resultados registrados en este documento.
 
 ## Objetivo de nivel de servicio
 
