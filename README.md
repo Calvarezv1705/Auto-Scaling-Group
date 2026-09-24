@@ -29,10 +29,18 @@ Monitor -> Decisor -> Actuador
              Auto Scaling Group
                        |
                        v
-              1 a 5 instancias EC2
+       VPC asc-vpc (172.16.0.0/16)
+                       |
+Internet ----------> ALB :80
                        |
                        v
-          Application Load Balancer
+              Target Group :8080
+                       |
+          +------------+------------+
+          |                         |
+          v                         v
+  Subred pública A          Subred pública B
+          +------ 1 a 5 EC2 --------+
 ```
 
 El controlador se ejecuta como un proceso Python externo a la aplicación web.
@@ -56,7 +64,9 @@ simulation/
   run_workload.py         Publica secuencias de ciclos
 
 infra/
+  README.md               Recrea la red y los recursos AWS
   user-data.sh            Instala y arranca la aplicación en EC2
+  cleanup.md              Elimina los recursos de forma segura
 
 docs/
   documentacion.md        Taxonomía y diseño del controlador
@@ -107,6 +117,9 @@ aws sts get-caller-identity
 ## Recursos AWS utilizados
 
 - Región: `us-east-1`
+- VPC reproducible: `asc-vpc` con CIDR `172.16.0.0/16`
+- Subred pública A: `172.16.1.0/24` en `us-east-1a`
+- Subred pública B: `172.16.2.0/24` en `us-east-1b`
 - Auto Scaling Group: `asc-web-asg`
 - Launch Template: `asc-launch-template`
 - Application Load Balancer: `asc-alb`
@@ -119,6 +132,12 @@ aws sts get-caller-identity
 - Namespace de CloudWatch: `AutoScalingController`
 - Métrica: `SimulatedDemand`
 - Dimensión: `Scenario=Challenge1`
+
+La ejecución experimental registrada se realizó originalmente sobre la
+VPC predeterminada disponible en AWS Academy. La guía de infraestructura
+actual crea una VPC personalizada para que las recreaciones futuras sean
+independientes de la configuración predeterminada de la cuenta. Este
+cambio de red no modifica la política ni los resultados del controlador.
 
 El ASG no debe tener políticas de escalamiento dinámico:
 

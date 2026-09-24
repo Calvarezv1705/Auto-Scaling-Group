@@ -1,10 +1,43 @@
-# Infraestructura AWS
+# Infraestructura AWS reproducible
 
-Este documento crea la infraestructura utilizada por el controlador en
-una cuenta o laboratorio AWS nuevo.
+Este documento crea desde cero la infraestructura utilizada por el
+controlador. Las recreaciones nuevas usan una VPC personalizada y no
+dependen de la VPC predeterminada de la cuenta.
+
+Actualizar esta guía no modifica la infraestructura que ya está activa.
+Los comandos solo crean recursos cuando una persona los ejecuta.
 
 No ejecutes los comandos si ya existen recursos con los nombres
-`asc-alb`, `asc-targets`, `asc-launch-template` y `asc-web-asg`.
+`asc-vpc`, `asc-alb`, `asc-targets`, `asc-launch-template` y
+`asc-web-asg`.
+
+## Arquitectura de red
+
+```text
+Internet
+   |
+Internet Gateway
+   |
+VPC asc-vpc: 172.16.0.0/16
+   |
+   +-- Subred pública A: 172.16.1.0/24 (us-east-1a)
+   |      +-- ALB
+   |      +-- Instancias EC2 del ASG
+   |
+   +-- Subred pública B: 172.16.2.0/24 (us-east-1b)
+          +-- ALB
+          +-- Instancias EC2 del ASG
+```
+
+Las instancias se ubican en subredes públicas para que `user-data.sh`
+pueda instalar paquetes sin el costo adicional de un NAT Gateway. El
+Security Group de la aplicación no acepta tráfico público: el puerto
+8080 solo recibe conexiones provenientes del Security Group del ALB.
+
+En una arquitectura de producción sería preferible colocar las
+instancias en subredes privadas y proporcionar salida mediante NAT
+Gateway o VPC endpoints. Esa alternativa no se usa en este experimento
+por costo y complejidad.
 
 ## 1. Requisitos
 
@@ -15,60 +48,177 @@ source .venv/bin/activate
 aws sts get-caller-identity
 ```
 
-Evita que AWS CLI abra el paginador:
+Evita que AWS CLI abra el paginador y define la región:
 
 ```bash
 export AWS_PAGER=""
-```
-
-Define la región:
-
-```bash
 REGION="us-east-1"
 ```
 
-## 2. Red y AMI
+## 2. VPC personalizada
 
-Obtén la VPC predeterminada:
+Define los rangos de red:
 
 ```bash
-VPC_ID=$(aws ec2 describe-vpcs \
+VPC_CIDR="172.16.0.0/16"
+SUBNET_A_CIDR="172.16.1.0/24"
+SUBNET_B_CIDR="172.16.2.0/24"
+AZ_A="us-east-1a"
+AZ_B="us-east-1b"
+```
+
+Crea la VPC:
+
+```bash
+VPC_ID=$(aws ec2 create-vpc \
   --region "$REGION" \
-  --filters Name=is-default,Values=true \
-  --query 'Vpcs[0].VpcId' \
+  --cidr-block "$VPC_CIDR" \
+  --tag-specifications \
+    'ResourceType=vpc,Tags=[{Key=Name,Value=asc-vpc},{Key=Project,Value=AutoScalingController}]' \
+  --query 'Vpc.VpcId' \
   --output text)
 ```
 
-Comprueba:
+Espera hasta que esté disponible:
 
 ```bash
-echo "$VPC_ID"
+aws ec2 wait vpc-available \
+  --region "$REGION" \
+  --vpc-ids "$VPC_ID"
 ```
 
-Obtén dos subredes de diferentes zonas de disponibilidad:
+Activa la resolución DNS y los nombres DNS internos:
 
 ```bash
-SUBNET_A=$(aws ec2 describe-subnets \
+aws ec2 modify-vpc-attribute \
   --region "$REGION" \
-  --filters Name=vpc-id,Values="$VPC_ID" \
-  --query 'sort_by(Subnets,&AvailabilityZone)[0].SubnetId' \
+  --vpc-id "$VPC_ID" \
+  --enable-dns-support '{"Value":true}'
+
+aws ec2 modify-vpc-attribute \
+  --region "$REGION" \
+  --vpc-id "$VPC_ID" \
+  --enable-dns-hostnames '{"Value":true}'
+```
+
+Comprueba que no sea la VPC predeterminada:
+
+```bash
+aws ec2 describe-vpcs \
+  --region "$REGION" \
+  --vpc-ids "$VPC_ID" \
+  --query 'Vpcs[0].[VpcId,CidrBlock,IsDefault,State]' \
+  --output table
+```
+
+El resultado debe mostrar `172.16.0.0/16`, `False` y `available`.
+
+## 3. Internet Gateway
+
+Crea el Internet Gateway:
+
+```bash
+IGW_ID=$(aws ec2 create-internet-gateway \
+  --region "$REGION" \
+  --tag-specifications \
+    'ResourceType=internet-gateway,Tags=[{Key=Name,Value=asc-igw},{Key=Project,Value=AutoScalingController}]' \
+  --query 'InternetGateway.InternetGatewayId' \
   --output text)
 ```
 
+Conéctalo a la VPC:
+
 ```bash
-SUBNET_B=$(aws ec2 describe-subnets \
+aws ec2 attach-internet-gateway \
   --region "$REGION" \
-  --filters Name=vpc-id,Values="$VPC_ID" \
-  --query 'sort_by(Subnets,&AvailabilityZone)[1].SubnetId' \
+  --internet-gateway-id "$IGW_ID" \
+  --vpc-id "$VPC_ID"
+```
+
+## 4. Subredes públicas
+
+Crea una subred en cada zona de disponibilidad:
+
+```bash
+SUBNET_A=$(aws ec2 create-subnet \
+  --region "$REGION" \
+  --vpc-id "$VPC_ID" \
+  --cidr-block "$SUBNET_A_CIDR" \
+  --availability-zone "$AZ_A" \
+  --tag-specifications \
+    'ResourceType=subnet,Tags=[{Key=Name,Value=asc-public-a},{Key=Project,Value=AutoScalingController}]' \
+  --query 'Subnet.SubnetId' \
+  --output text)
+
+SUBNET_B=$(aws ec2 create-subnet \
+  --region "$REGION" \
+  --vpc-id "$VPC_ID" \
+  --cidr-block "$SUBNET_B_CIDR" \
+  --availability-zone "$AZ_B" \
+  --tag-specifications \
+    'ResourceType=subnet,Tags=[{Key=Name,Value=asc-public-b},{Key=Project,Value=AutoScalingController}]' \
+  --query 'Subnet.SubnetId' \
   --output text)
 ```
 
-Comprueba:
+Activa la asignación automática de IPv4 pública. Esto permite que las
+instancias descarguen paquetes durante su arranque:
 
 ```bash
-echo "$SUBNET_A"
-echo "$SUBNET_B"
+aws ec2 modify-subnet-attribute \
+  --region "$REGION" \
+  --subnet-id "$SUBNET_A" \
+  --map-public-ip-on-launch
+
+aws ec2 modify-subnet-attribute \
+  --region "$REGION" \
+  --subnet-id "$SUBNET_B" \
+  --map-public-ip-on-launch
 ```
+
+## 5. Tabla de rutas pública
+
+Crea la tabla de rutas:
+
+```bash
+ROUTE_TABLE_ID=$(aws ec2 create-route-table \
+  --region "$REGION" \
+  --vpc-id "$VPC_ID" \
+  --tag-specifications \
+    'ResourceType=route-table,Tags=[{Key=Name,Value=asc-public-rt},{Key=Project,Value=AutoScalingController}]' \
+  --query 'RouteTable.RouteTableId' \
+  --output text)
+```
+
+Crea la ruta hacia Internet:
+
+```bash
+aws ec2 create-route \
+  --region "$REGION" \
+  --route-table-id "$ROUTE_TABLE_ID" \
+  --destination-cidr-block 0.0.0.0/0 \
+  --gateway-id "$IGW_ID"
+```
+
+Asocia ambas subredes:
+
+```bash
+ROUTE_ASSOC_A=$(aws ec2 associate-route-table \
+  --region "$REGION" \
+  --route-table-id "$ROUTE_TABLE_ID" \
+  --subnet-id "$SUBNET_A" \
+  --query 'AssociationId' \
+  --output text)
+
+ROUTE_ASSOC_B=$(aws ec2 associate-route-table \
+  --region "$REGION" \
+  --route-table-id "$ROUTE_TABLE_ID" \
+  --subnet-id "$SUBNET_B" \
+  --query 'AssociationId' \
+  --output text)
+```
+
+## 6. AMI
 
 Obtén la versión actual de Amazon Linux 2023 para x86_64:
 
@@ -80,13 +230,7 @@ AMI_ID=$(aws ssm get-parameter \
   --output text)
 ```
 
-Comprueba:
-
-```bash
-echo "$AMI_ID"
-```
-
-## 3. Security Groups
+## 7. Security Groups
 
 Crea el Security Group público del ALB:
 
@@ -138,16 +282,7 @@ aws ec2 authorize-security-group-ingress \
   --source-group "$ALB_SG_ID"
 ```
 
-Comprueba los identificadores:
-
-```bash
-echo "$ALB_SG_ID"
-echo "$APP_SG_ID"
-```
-
-## 4. Target Group
-
-Crea el Target Group:
+## 8. Target Group
 
 ```bash
 TG_ARN=$(aws elbv2 create-target-group \
@@ -170,15 +305,7 @@ TG_ARN=$(aws elbv2 create-target-group \
   --output text)
 ```
 
-Comprueba:
-
-```bash
-echo "$TG_ARN"
-```
-
-## 5. Application Load Balancer
-
-Crea el ALB:
+## 9. Application Load Balancer
 
 ```bash
 ALB_ARN=$(aws elbv2 create-load-balancer \
@@ -225,23 +352,12 @@ ALB_DNS=$(aws elbv2 describe-load-balancers \
   --output text)
 ```
 
-Comprueba:
+## 10. Launch Template
 
-```bash
-echo "$ALB_DNS"
-```
-
-## 6. Launch Template
-
-Valida el script de inicio:
+Valida y codifica el script de inicio:
 
 ```bash
 bash -n infra/user-data.sh
-```
-
-Codifica el script para enviarlo a EC2:
-
-```bash
 USER_DATA_B64=$(base64 < infra/user-data.sh | tr -d '\n')
 ```
 
@@ -260,15 +376,7 @@ LT_ID=$(aws ec2 create-launch-template \
   --output text)
 ```
 
-Comprueba:
-
-```bash
-echo "$LT_ID"
-```
-
-## 7. Auto Scaling Group
-
-Crea el ASG:
+## 11. Auto Scaling Group
 
 ```bash
 aws autoscaling create-auto-scaling-group \
@@ -288,7 +396,19 @@ aws autoscaling create-auto-scaling-group \
     ResourceId=asc-web-asg,ResourceType=auto-scaling-group,Key=Project,Value=AutoScalingController,PropagateAtLaunch=true
 ```
 
-## 8. Verificación
+## 12. Verificación final
+
+Comprueba la red:
+
+```bash
+aws ec2 describe-vpcs \
+  --region "$REGION" \
+  --vpc-ids "$VPC_ID" \
+  --query 'Vpcs[0].[VpcId,CidrBlock,IsDefault]' \
+  --output table
+```
+
+`IsDefault` debe ser `False`.
 
 Consulta el ASG:
 
@@ -321,11 +441,7 @@ aws autoscaling describe-policies \
   --query 'ScalingPolicies'
 ```
 
-El resultado esperado es:
-
-```json
-[]
-```
+El resultado esperado es `[]`.
 
 Prueba la aplicación:
 
@@ -333,34 +449,44 @@ Prueba la aplicación:
 curl -sS "http://$ALB_DNS/health"
 ```
 
-Debe responder:
+Debe responder `OK`.
 
-```text
-OK
-```
-
-## 9. Recuperar variables en otra terminal
+## 13. Recuperar variables en otra terminal
 
 Las variables anteriores existen solamente en la terminal donde se
-crearon. Para recuperar los principales identificadores:
+crearon. Para recuperarlas por etiquetas y nombres:
 
 ```bash
+VPC_ID=$(aws ec2 describe-vpcs \
+  --region us-east-1 \
+  --filters Name=tag:Name,Values=asc-vpc \
+  --query 'Vpcs[?IsDefault==`false`]|[0].VpcId' \
+  --output text)
+
+SUBNET_A=$(aws ec2 describe-subnets \
+  --region us-east-1 \
+  --filters Name=vpc-id,Values="$VPC_ID" Name=tag:Name,Values=asc-public-a \
+  --query 'Subnets[0].SubnetId' \
+  --output text)
+
+SUBNET_B=$(aws ec2 describe-subnets \
+  --region us-east-1 \
+  --filters Name=vpc-id,Values="$VPC_ID" Name=tag:Name,Values=asc-public-b \
+  --query 'Subnets[0].SubnetId' \
+  --output text)
+
 TG_ARN=$(aws elbv2 describe-target-groups \
   --region us-east-1 \
   --names asc-targets \
   --query 'TargetGroups[0].TargetGroupArn' \
   --output text)
-```
 
-```bash
 ALB_ARN=$(aws elbv2 describe-load-balancers \
   --region us-east-1 \
   --names asc-alb \
   --query 'LoadBalancers[0].LoadBalancerArn' \
   --output text)
-```
 
-```bash
 ALB_DNS=$(aws elbv2 describe-load-balancers \
   --region us-east-1 \
   --names asc-alb \

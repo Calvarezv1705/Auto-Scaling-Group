@@ -54,6 +54,29 @@ Monitor -> Decisor -> Actuador
 
 El controlador se ejecuta como un proceso Python en el computador del operador. La aplicación web funciona en las instancias EC2 y expone el endpoint `/health`.
 
+## Diseño de red reproducible
+
+Las recreaciones nuevas despliegan los recursos en una VPC personalizada
+`asc-vpc` con CIDR `172.16.0.0/16`. La red contiene dos subredes públicas:
+
+- `172.16.1.0/24` en `us-east-1a`.
+- `172.16.2.0/24` en `us-east-1b`.
+
+Un Internet Gateway y una tabla de rutas con destino `0.0.0.0/0`
+permiten que el ALB sea público y que las instancias instalen paquetes
+durante el arranque. El ALB acepta HTTP por el puerto 80. Las instancias
+aceptan el puerto 8080 exclusivamente desde el Security Group del ALB.
+
+Se eligieron subredes públicas para evitar el costo de un NAT Gateway en
+el laboratorio. En producción sería preferible ubicar las instancias en
+subredes privadas y proporcionar salida controlada mediante NAT Gateway
+o VPC endpoints.
+
+La ejecución experimental registrada se realizó antes de esta mejora de
+reproducibilidad y utilizó la VPC predeterminada disponible en AWS
+Academy. La topología lógica, la política del controlador y sus
+resultados no dependen de que la VPC sea predeterminada o personalizada.
+
 ## Componentes del lazo de control
 
 ### Generador

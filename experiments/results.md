@@ -3,6 +3,7 @@
 ## Configuración
 
 - Región AWS: `us-east-1`.
+- Red de la ejecución registrada: VPC predeterminada de AWS Academy.
 - Auto Scaling Group: `asc-web-asg`.
 - Capacidad mínima: 1 instancia.
 - Capacidad máxima: 5 instancias.
@@ -14,6 +15,11 @@
 - Cooldown: 300 segundos.
 - Semilla del generador: 3016.
 - Políticas de escalamiento administradas por AWS: ninguna.
+
+Después del experimento se mejoró la guía de infraestructura para que
+las recreaciones futuras creen una VPC personalizada `172.16.0.0/16`
+con dos subredes públicas. Esta mejora no cambia la política ni los
+resultados registrados en este documento.
 
 ## Objetivo de nivel de servicio
 
@@ -65,6 +71,22 @@ fue de aproximadamente 398,4 segundos, equivalentes a 6 minutos y
 
 Los tiempos corresponden a una sola ejecución y no representan un
 promedio ni una garantía del servicio AWS.
+
+## Uso de recursos
+
+La capacidad deseada permaneció en 2 desde la solicitud de aumento a
+las `02:56:09` hasta la solicitud de reducción a las `03:07:25`, un
+intervalo aproximado de 11 minutos y 16 segundos.
+
+Las dos instancias estuvieron saludables simultáneamente desde las
+`02:56:46` hasta la solicitud de reducción, aproximadamente 10 minutos
+y 39 segundos. El intervalo entre la solicitud de aumento y la
+terminación física final fue de 17 minutos y 55 segundos.
+
+Estos tiempos permiten expresar el costo experimental como tiempo de
+instancia adicional. No se informa un costo monetario exacto porque el
+laboratorio no registró una tarifa facturada atribuible exclusivamente
+a esta ejecución.
 
 ## Disponibilidad
 
