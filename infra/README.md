@@ -1,11 +1,7 @@
 # Infraestructura AWS reproducible
 
 Este documento crea desde cero la infraestructura utilizada por el
-controlador. Las recreaciones nuevas usan una VPC personalizada y no
-dependen de la VPC predeterminada de la cuenta.
-
-Actualizar esta guía no modifica la infraestructura que ya está activa.
-Los comandos solo crean recursos cuando una persona los ejecuta.
+controlador. 
 
 No ejecutes los comandos si ya existen recursos con los nombres
 `asc-vpc`, `asc-alb`, `asc-targets`, `asc-launch-template` y
